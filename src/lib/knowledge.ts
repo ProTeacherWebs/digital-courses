@@ -31,15 +31,23 @@ const store = globalThis as unknown as {
   __driveContent?: Map<string, Buffer>;
 };
 
+// Ключ сервисного аккаунта: целый JSON в GOOGLE_SERVICE_ACCOUNT_JSON (для Vercel), путь к файлу в
+// GOOGLE_SERVICE_ACCOUNT_FILE (локально) или пара GOOGLE_SERVICE_ACCOUNT_EMAIL и GOOGLE_PRIVATE_KEY.
+// Если в переменную с путём вставили сам JSON, он тоже принимается. Неверный ключ не роняет сайт: берётся knowledge/.
 function credentials(): { email: string; key: string } | null {
-  const file = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
-  if (file) {
-    const json = JSON.parse(readFileSync(path.resolve(process.cwd(), file), "utf8"));
-    return { email: json.client_email, key: json.private_key };
+  try {
+    const raw = (process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_FILE || "").trim();
+    if (raw) {
+      const json = JSON.parse(raw.startsWith("{") ? raw : readFileSync(path.resolve(process.cwd(), raw), "utf8"));
+      return json.client_email && json.private_key ? { email: json.client_email, key: json.private_key } : null;
+    }
+    const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+    return email && key ? { email, key } : null;
+  } catch (error) {
+    console.error("Не удалось прочитать ключ Google:", error instanceof Error ? error.message.slice(0, 120) : error);
+    return null;
   }
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  return email && key ? { email, key } : null;
 }
 
 function driveFolder(): string | null {
