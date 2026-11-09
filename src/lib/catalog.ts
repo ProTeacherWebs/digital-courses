@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { connection } from "next/server";
 import * as XLSX from "xlsx";
+import { readKnowledgeFile } from "./knowledge";
 
 export type Course = {
   title: string;
@@ -22,8 +21,6 @@ export type Teacher = {
   description: string;
 };
 
-const CATALOG_PATH = path.join(process.cwd(), "knowledge", "catalog.xlsx");
-
 const text = (value: unknown) => String(value ?? "").trim();
 
 function number(value: unknown): number | null {
@@ -36,10 +33,10 @@ function rows(workbook: XLSX.WorkBook, sheet: string) {
   return worksheet ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
 }
 
-// Читается при каждом запросе: правки в Excel сразу видны на сайте.
+// Читается при каждом запросе из той же базы знаний (Google Drive или папка knowledge/): правки в таблице быстро видны на сайте.
 export async function getCatalog(): Promise<{ courses: Course[]; teachers: Teacher[] }> {
   await connection();
-  const workbook = XLSX.read(readFileSync(CATALOG_PATH));
+  const workbook = XLSX.read(await readKnowledgeFile("catalog.xlsx"));
 
   const courses = rows(workbook, "Курсы").flatMap((row) => {
     const price = number(row["Цена"]);

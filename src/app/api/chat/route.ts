@@ -1,5 +1,8 @@
 import { search } from "@/lib/rag";
 
+// Первый запрос после «холодного» старта скачивает файлы с Google Drive и строит индекс.
+export const maxDuration = 60;
+
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const MAX_MESSAGES = 10;
 const MAX_LENGTH = 2000;

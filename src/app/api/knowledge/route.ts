@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { KNOWLEDGE_DIR, SUPPORTED } from "@/lib/rag";
+import { KNOWLEDGE_DIR, SUPPORTED } from "@/lib/knowledge";
 
 const TYPES: Record<string, string> = {
   ".txt": "text/plain; charset=utf-8",

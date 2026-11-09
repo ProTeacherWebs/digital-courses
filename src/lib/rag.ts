@@ -1,11 +1,8 @@
-import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 import { extractText } from "unpdf";
 import * as XLSX from "xlsx";
-
-export const KNOWLEDGE_DIR = path.join(process.cwd(), "knowledge");
-export const SUPPORTED = [".md", ".txt", ".pdf", ".docx", ".xlsx", ".xls", ".csv"];
+import { getKnowledgeFiles, type KnowledgeFile } from "./knowledge";
 
 const CHUNK_SIZE = 900;
 
@@ -13,18 +10,6 @@ type Chunk = { source: string; text: string; terms: Map<string, number>; length:
 type Index = { signature: string; chunks: Chunk[]; df: Map<string, number>; avgLength: number };
 
 export type Hit = { source: string; text: string; score: number };
-
-async function listFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) return listFiles(full);
-      return SUPPORTED.includes(path.extname(entry.name).toLowerCase()) ? [full] : [];
-    }),
-  );
-  return nested.flat().sort();
-}
 
 function sheetsToText(buffer: Buffer): string {
   const workbook = XLSX.read(buffer);
@@ -38,9 +23,8 @@ function sheetsToText(buffer: Buffer): string {
   ).join("\n");
 }
 
-async function readText(file: string): Promise<string> {
-  const ext = path.extname(file).toLowerCase();
-  const buffer = await readFile(file);
+async function readText(name: string, buffer: Buffer): Promise<string> {
+  const ext = path.extname(name).toLowerCase();
   if (ext === ".pdf") {
     const { text } = await extractText(new Uint8Array(buffer), { mergePages: true });
     return text;
@@ -94,14 +78,16 @@ function tokenize(text: string): string[] {
     .filter((term) => !STEM_STOP.has(term));
 }
 
-async function build(signature: string, files: string[]): Promise<Index> {
+async function build(signature: string, files: KnowledgeFile[]): Promise<Index> {
   const chunks: Chunk[] = [];
   const df = new Map<string, number>();
-  for (const file of files) {
-    const source = path.relative(KNOWLEDGE_DIR, file).split(path.sep).join("/");
-    const raw = await readText(file);
+  // Файлы скачиваются параллельно: с Google Drive это заметно быстрее, чем по одному.
+  const buffers = await Promise.all(files.map((file) => file.read()));
+  for (const [i, file] of files.entries()) {
+    const source = file.name;
+    const raw = await readText(file.name, buffers[i]);
     // Каждая строка таблицы — отдельный фрагмент: так цена и преподаватель курса не смешиваются с другими курсами.
-    const pieces = [".xlsx", ".xls", ".csv"].includes(path.extname(file).toLowerCase()) ? raw.split("\n").filter(Boolean) : chunkText(raw);
+    const pieces = [".xlsx", ".xls", ".csv"].includes(path.extname(file.name).toLowerCase()) ? raw.split("\n").filter(Boolean) : chunkText(raw);
     for (const text of pieces) {
       const tokens = tokenize(`${source} ${text}`);
       const terms = new Map<string, number>();
@@ -114,13 +100,12 @@ async function build(signature: string, files: string[]): Promise<Index> {
   return { signature, chunks, df, avgLength };
 }
 
-// Индекс живёт в памяти процесса и пересобирается, когда меняется состав, размер или дата файлов.
+// Индекс живёт в памяти процесса и пересобирается, когда меняется состав или версия файлов (локальных или на Drive).
 const store = globalThis as unknown as { __ragIndex?: Promise<Index> };
 
 async function getIndex(): Promise<Index> {
-  const files = await listFiles(KNOWLEDGE_DIR);
-  const stats = await Promise.all(files.map((file) => stat(file)));
-  const signature = files.map((file, i) => `${file}:${stats[i].size}:${stats[i].mtimeMs}`).join("|");
+  const files = await getKnowledgeFiles();
+  const signature = files.map((file) => `${file.name}:${file.version}`).join("|");
 
   const current = store.__ragIndex;
   if (current) {
